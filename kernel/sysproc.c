@@ -1,7 +1,7 @@
 #include "types.h"
 #include "riscv.h"
-#include "defs.h"
 #include "param.h"
+#include "defs.h"
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
@@ -54,9 +54,8 @@ sys_sleep(void)
   int n;
   uint ticks0;
 
+
   argint(0, &n);
-  if(n < 0)
-    n = 0;
   acquire(&tickslock);
   ticks0 = ticks;
   while(ticks - ticks0 < n){
@@ -69,6 +68,46 @@ sys_sleep(void)
   release(&tickslock);
   return 0;
 }
+
+
+#define PTE_A (1 << 6)
+#ifdef LAB_PGTBL
+int
+sys_pgaccess(void)
+{
+  // lab pgtbl: your code here.
+
+   unsigned int abits=0;
+
+  uint64 va ;
+  argaddr(0, &va);
+
+  int page ;
+  argint(1,&page);
+
+  uint64 result ;
+  argaddr(2, &result);
+
+
+  struct proc *p = myproc();
+
+  for(int i = 0 ;i < page ;i ++){
+    uint64 addr = va + i*PGSIZE;
+    pte_t* pte = walk(p->pagetable, addr,0);
+    vmprint(pte);
+    if(*pte & PTE_A) {
+      //printf("%d\n",i );
+      //printf("accessed\n");
+        abits = abits | (1 << i);
+        *pte=(*pte)&(~PTE_A);
+    }
+  }
+
+  if(copyout(p->pagetable,result,(char*)&abits, sizeof(abits)) < 0) return -1;
+
+  return 0;
+}
+#endif
 
 uint64
 sys_kill(void)
@@ -91,3 +130,4 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
