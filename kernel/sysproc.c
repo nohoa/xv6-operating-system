@@ -70,44 +70,48 @@ sys_sleep(void)
 }
 
 
-#define PTE_A (1 << 6)
-#ifdef LAB_PGTBL
 int
 sys_pgaccess(void)
 {
   // lab pgtbl: your code here.
+  uint64 start_va;
+  int page_no ;
+  uint64 abits ;
 
-   unsigned int abits=0;
+  uint64 temp = 0;
 
-  uint64 va ;
-  argaddr(0, &va);
-
-  int page ;
-  argint(1,&page);
-
-  uint64 result ;
-  argaddr(2, &result);
+  argaddr(0,&start_va);
+  argint(1,&page_no);
+  argaddr(2,&abits);
 
 
   struct proc *p = myproc();
-
-  for(int i = 0 ;i < page ;i ++){
-    uint64 addr = va + i*PGSIZE;
-    pte_t* pte = walk(p->pagetable, addr,0);
-    vmprint(pte);
-    if(*pte & PTE_A) {
-      //printf("%d\n",i );
-      //printf("accessed\n");
-        abits = abits | (1 << i);
-        *pte=(*pte)&(~PTE_A);
-    }
+  int cnt = 0 ;
+  int access[page_no+2];
+  for(int i = 0 ;i <page_no +1  ;i ++){
+    access[i] = 0;
   }
+  for(uint64 va = start_va ; va  < start_va + page_no*PGSIZE ; va += PGSIZE){
+        pte_t *pte = walk(p->pagetable,va,0);
+        if(*pte & PTE_A){
+           access[cnt] = 1;
+        }
+        //printf("%d\n",cnt);
+        cnt ++;
+  } 
+    for(int i = 1 ;i < page_no ;i ++){
+      if(access[i] == 1){
+        temp |= (1 << i);
+      }
+    }
+    //printf("value is : %ld\n",temp);
 
-  if(copyout(p->pagetable,result,(char*)&abits, sizeof(abits)) < 0) return -1;
+  if(copyout(p->pagetable, abits, (char*)&temp,sizeof(temp)) < 0) return -1;
+
+  //printf("bits : %d\n",temp);
 
   return 0;
 }
-#endif
 
 uint64
 sys_kill(void)
@@ -130,4 +134,3 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
-
