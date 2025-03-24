@@ -1,7 +1,7 @@
 #include "types.h"
 #include "riscv.h"
-#include "param.h"
 #include "defs.h"
+#include "param.h"
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
@@ -54,8 +54,9 @@ sys_sleep(void)
   int n;
   uint ticks0;
 
-
   argint(0, &n);
+  if(n < 0)
+    n = 0;
   acquire(&tickslock);
   ticks0 = ticks;
   while(ticks - ticks0 < n){
@@ -66,50 +67,7 @@ sys_sleep(void)
     sleep(&ticks, &tickslock);
   }
   release(&tickslock);
-  return 0;
-}
-
-
-int
-sys_pgaccess(void)
-{
-  // lab pgtbl: your code here.
-  uint64 start_va;
-  int page_no ;
-  uint64 abits ;
-
-  uint64 temp = 0;
-
-  argaddr(0,&start_va);
-  argint(1,&page_no);
-  argaddr(2,&abits);
-
-
-  struct proc *p = myproc();
-  int cnt = 0 ;
-  int access[page_no+2];
-  for(int i = 0 ;i <page_no +1  ;i ++){
-    access[i] = 0;
-  }
-  for(uint64 va = start_va ; va  < start_va + page_no*PGSIZE ; va += PGSIZE){
-        pte_t *pte = walk(p->pagetable,va,0);
-        if(*pte & PTE_A){
-           access[cnt] = 1;
-        }
-        //printf("%d\n",cnt);
-        cnt ++;
-  } 
-    for(int i = 1 ;i < page_no ;i ++){
-      if(access[i] == 1){
-        temp |= (1 << i);
-      }
-    }
-    //printf("value is : %ld\n",temp);
-
-  if(copyout(p->pagetable, abits, (char*)&temp,sizeof(temp)) < 0) return -1;
-
-  //printf("bits : %d\n",temp);
-
+  backtrace();
   return 0;
 }
 
