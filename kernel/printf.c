@@ -66,7 +66,7 @@ printf(char *fmt, ...)
   va_list ap;
   int i, c, locking;
   char *s;
-
+  
   locking = pr.locking;
   if(locking)
     acquire(&pr.lock);
@@ -122,6 +122,7 @@ panic(char *s)
   printf("panic: ");
   printf(s);
   printf("\n");
+  backtrace();
   panicked = 1; // freeze uart output from other CPUs
   for(;;)
     ;
@@ -132,4 +133,22 @@ printfinit(void)
 {
   initlock(&pr.lock, "pr");
   pr.locking = 1;
+}
+void 
+backtrace (void) 
+{
+  printf("backtrace :\n");
+
+  uint64 current_fp = r_fp();
+
+  uint64 end_location1 = PGROUNDUP(current_fp);
+
+  uint64 end_location2 = PGROUNDDOWN(current_fp);
+
+  while(current_fp <= end_location1 && current_fp >= end_location2){
+    uint64 value = *(uint64*)(current_fp-8);
+    printf("%p\n", value);
+    current_fp = *(uint64*)(current_fp-16);
+  }
+
 }
