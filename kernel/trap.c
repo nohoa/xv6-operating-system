@@ -65,7 +65,51 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } else if((which_dev = devintr()) != 0){
+  } 
+  else if(r_scause() == 15){
+      //printf("cow here\n");
+     uint64 start_va = PGROUNDDOWN(r_stval());
+    // if(start_va >= MAXVA) exit(-1);
+
+     pte_t* pte ;
+     uint64 pa ;
+     uint flags ;
+     char * mem ;
+      //printf("once\n");
+     if((pte = walk(p->pagetable,start_va,0)) == 0){
+      printf("page not found \n");
+        setkilled(p);
+     }
+     if ((*pte & PTE_V) && (*pte & PTE_U) && (*pte & PTE_RSW)) {
+
+    pa = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte);
+
+    flags |= PTE_W;
+    flags  = flags & (~PTE_RSW);
+
+    if((mem = kalloc()) == 0) exit(-1);
+    
+    memmove(mem, (char*)pa, PGSIZE);
+
+
+    uvmunmap(p->pagetable,start_va,1,0);
+    //printf("cow here\n");
+    //printf("here \n");
+    if(mappages(p->pagetable,start_va,PGSIZE,(uint64)mem,flags) != 0){
+        kfree(mem);
+        panic("can't map to new page");
+    }
+    //uvmunmap(p->pagetable,start_va,)
+    // if(mappages(p->pagetable,start_va,PGSIZE,(uint64)mem,flags) != 0){
+    //   setkilled(p);
+    // }
+   // setkilled(p);
+    kfree((void *)pa);
+    }
+
+  }
+   else if((which_dev = devintr()) != 0){
     // ok
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
@@ -79,7 +123,7 @@ usertrap(void)
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2)
     yield();
-
+  //printf("return\n");
   usertrapret();
 }
 
