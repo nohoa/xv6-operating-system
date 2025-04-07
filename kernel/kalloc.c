@@ -13,6 +13,9 @@ void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
+int memcount[PHYSTOP/PGSIZE] = {0};                   
+
+struct spinlock count_lock ;
 
 struct run {
   struct run *next;
@@ -27,18 +30,8 @@ void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  initlock(&count_lock, "c_lock");
   freerange(end, (void*)PHYSTOP);
-}
-
-int refcnt[PHYSTOP/PGSIZE];
-void increase_ref( uint64 pa){
-  acquire(&kmem.lock);
-  int pn = pa /PGSIZE;
-  if(pa >= PHYSTOP){
-    panic("reference count error");
-  }
-  refcnt[pn] ++;
-  release(&kmem.lock);
 }
 
 void
@@ -46,10 +39,8 @@ freerange(void *pa_start, void *pa_end)
 {
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE){
+  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
     kfree(p);
-    refcnt[(uint64)p/PGSIZE] = 1;
-  }
 }
 
 // Free the page of physical memory pointed at by pa,
@@ -60,31 +51,28 @@ void
 kfree(void *pa)
 {
   struct run *r;
-  uint64 a;
 
-  //COW: Decreasing counter
-  a = (uint64)pa;
-  acquire(&kmem.lock);
-  refcnt[a/PGSIZE]--; 
-  release(&kmem.lock);
+  if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
+    panic("kfree");
+
+  acquire(&count_lock);
+
+  int index = (uint64)pa/PGSIZE;
+   memcount[index] -- ;
   
-  //COW: Free page only when there is no va that refers to it
-  if(refcnt[a/PGSIZE] <=0){
-    if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
-      panic("kfree");
+  release(&count_lock);
 
-    // Fill with junk to catch dangling refs.
-    memset(pa, 1, PGSIZE);
+  if(memcount[(uint64)pa/PGSIZE] > 0 ) return ;
+  // Fill with junk to catch dangling refs.
+  memset(pa, 1, PGSIZE);
 
-    r = (struct run*)pa;
+  r = (struct run*)pa;
 
-    acquire(&kmem.lock);
-    r->next = kmem.freelist;
-    kmem.freelist = r;
-    release(&kmem.lock);
-  }
+  acquire(&kmem.lock);
+  r->next = kmem.freelist;
+  kmem.freelist = r;
+  release(&kmem.lock);
 }
-
 
 // Allocate one 4096-byte page of physical memory.
 // Returns a pointer that the kernel can use.
@@ -96,14 +84,34 @@ kalloc(void)
 
   acquire(&kmem.lock);
   r = kmem.freelist;
-  int pn = (uint64)r/PGSIZE;
   if(r){
     kmem.freelist = r->next;
+    acquire(&count_lock);
+    int index = (uint64)r / PGSIZE;
+    memcount[index] = 1;
+    release(&count_lock);
   }
-  refcnt[pn] = 1;
   release(&kmem.lock);
+
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+}
+
+
+void kcount(int index){
+  acquire(&count_lock);
+  memcount[index] ++;
+  release(&count_lock);
+}
+
+int
+knum(int index)
+{
+    acquire(&count_lock);
+    int num = memcount[index];
+    release(&count_lock);
+
+    return num;
 }
