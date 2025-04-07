@@ -33,6 +33,50 @@ trapinithart(void)
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
 //
+
+int perform_cow (pagetable_t pagetable, uint64 start_va){
+
+    if(start_va >= MAXVA){
+      return -1;
+    }
+    pte_t* pte = walk(pagetable,start_va,0);
+    if(pte == 0){
+      return -1;
+    }
+    if((*pte &PTE_V) == 0) return -1;
+    if((*pte & PTE_COW) == 0) return 0;
+
+    uint64 pa = PTE2PA(*pte);
+
+    //int num = knum(pa/PGSIZE);
+
+    *pte = *pte & (~PTE_COW );
+    
+    *pte = *pte | (PTE_W);
+
+    uint flags = PTE_FLAGS(*pte);
+
+      
+      char*mem ;
+
+    if((mem = kalloc()) == 0){
+      myproc()->killed = 1;
+      exit(-1);
+      return -1;
+    }
+    memmove(mem, (char*)pa, PGSIZE);
+
+    uvmunmap(pagetable,start_va,1,0);
+
+    if(mappages(pagetable,start_va,PGSIZE,(uint64)mem,flags) != 0){
+      kfree(mem);
+      return -1;
+    }
+    kfree((void *)pa);
+    return 1;
+
+}
+
 void
 usertrap(void)
 {
@@ -65,51 +109,15 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } 
-  else if(r_scause() == 15){
-      //printf("cow here\n");
-     uint64 start_va = PGROUNDDOWN(r_stval());
-    // if(start_va >= MAXVA) exit(-1);
-
-     pte_t* pte ;
-     uint64 pa ;
-     uint flags ;
-     char * mem ;
-      //printf("once\n");
-     if((pte = walk(p->pagetable,start_va,0)) == 0){
-      printf("page not found \n");
-        setkilled(p);
-     }
-     if ((*pte & PTE_V) && (*pte & PTE_U) && (*pte & PTE_RSW)) {
-
-    pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
-
-    flags |= PTE_W;
-    flags  = flags & (~PTE_RSW);
-
-    if((mem = kalloc()) == 0) exit(-1);
-    
-    memmove(mem, (char*)pa, PGSIZE);
-
-
-    uvmunmap(p->pagetable,start_va,1,0);
-    //printf("cow here\n");
-    //printf("here \n");
-    if(mappages(p->pagetable,start_va,PGSIZE,(uint64)mem,flags) != 0){
-        kfree(mem);
-        panic("can't map to new page");
-    }
-    //uvmunmap(p->pagetable,start_va,)
-    // if(mappages(p->pagetable,start_va,PGSIZE,(uint64)mem,flags) != 0){
-    //   setkilled(p);
-    // }
-   // setkilled(p);
-    kfree((void *)pa);
+  }
+  else if(r_scause() == 13 || r_scause() == 15 ){
+    if(perform_cow(myproc()->pagetable, PGROUNDDOWN(r_stval())) <= 0){
+      printf("error cow page\n");
+      setkilled(myproc());
     }
 
   }
-   else if((which_dev = devintr()) != 0){
+  else if((which_dev = devintr()) != 0){
     // ok
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
@@ -123,7 +131,7 @@ usertrap(void)
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2)
     yield();
-  //printf("return\n");
+
   usertrapret();
 }
 
