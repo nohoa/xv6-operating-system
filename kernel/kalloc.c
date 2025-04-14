@@ -13,24 +13,25 @@ void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
-int memcount[PHYSTOP/PGSIZE] = {0};                   
-
-struct spinlock count_lock ;
 
 struct run {
   struct run *next;
 };
 
-struct {
+struct kmem{
   struct spinlock lock;
   struct run *freelist;
-} kmem;
+} ;
+
+struct kmem cpu_mem[NCPU];
 
 void
 kinit()
 {
-  initlock(&kmem.lock, "kmem");
-  initlock(&count_lock, "c_lock");
+  for(int i = 0 ;i < NCPU ;i ++){
+  initlock(&cpu_mem[i].lock, "kmem");
+  }
+
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -55,23 +56,17 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
-  acquire(&count_lock);
-
-  int index = (uint64)pa/PGSIZE;
-   memcount[index] -- ;
-  
-  release(&count_lock);
-
-  if(memcount[(uint64)pa/PGSIZE] > 0 ) return ;
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
   r = (struct run*)pa;
-
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+  push_off();
+  int id = cpuid();
+  acquire(&cpu_mem[id].lock);
+  r->next = cpu_mem[id].freelist;
+  cpu_mem[id].freelist = r;
+  release(&cpu_mem[id].lock);
+  pop_off();
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -82,36 +77,31 @@ kalloc(void)
 {
   struct run *r;
 
-  acquire(&kmem.lock);
-  r = kmem.freelist;
-  if(r){
-    kmem.freelist = r->next;
-    acquire(&count_lock);
-    int index = (uint64)r / PGSIZE;
-    memcount[index] = 1;
-    release(&count_lock);
+  push_off();
+  int id = cpuid();
+
+  acquire(&cpu_mem[id].lock);
+  r = cpu_mem[id].freelist;
+  if(r)
+    cpu_mem[id].freelist = r->next;
+  release(&cpu_mem[id].lock);
+
+  if(!r){
+    for(int i = 0 ;i < NCPU ;i ++){
+      if(i == id) continue;
+      acquire(&cpu_mem[i].lock);
+      struct run*r1 = cpu_mem[i].freelist;
+      if(r1){
+        r = r1 ;
+        cpu_mem[i].freelist = r1->next;
+      }
+      release(&cpu_mem[i].lock);
+      if(r) break;
+    }
   }
-  release(&kmem.lock);
-
-
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
+
+  pop_off();
   return (void*)r;
-}
-
-
-void kcount(int index){
-  acquire(&count_lock);
-  memcount[index] ++;
-  release(&count_lock);
-}
-
-int
-knum(int index)
-{
-    acquire(&count_lock);
-    int num = memcount[index];
-    release(&count_lock);
-
-    return num;
 }
