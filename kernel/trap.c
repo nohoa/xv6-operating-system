@@ -33,50 +33,6 @@ trapinithart(void)
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
 //
-
-int perform_cow (pagetable_t pagetable, uint64 start_va){
-
-    if(start_va >= MAXVA){
-      return -1;
-    }
-    pte_t* pte = walk(pagetable,start_va,0);
-    if(pte == 0){
-      return -1;
-    }
-    if((*pte &PTE_V) == 0) return -1;
-    if((*pte & PTE_COW) == 0) return 0;
-
-    uint64 pa = PTE2PA(*pte);
-
-    //int num = knum(pa/PGSIZE);
-
-    *pte = *pte & (~PTE_COW );
-    
-    *pte = *pte | (PTE_W);
-
-    uint flags = PTE_FLAGS(*pte);
-
-      
-      char*mem ;
-
-    if((mem = kalloc()) == 0){
-      myproc()->killed = 1;
-      exit(-1);
-      return -1;
-    }
-    memmove(mem, (char*)pa, PGSIZE);
-
-    uvmunmap(pagetable,start_va,1,0);
-
-    if(mappages(pagetable,start_va,PGSIZE,(uint64)mem,flags) != 0){
-      kfree(mem);
-      return -1;
-    }
-    kfree((void *)pa);
-    return 1;
-
-}
-
 void
 usertrap(void)
 {
@@ -109,15 +65,7 @@ usertrap(void)
     intr_on();
 
     syscall();
-  }
-  else if(r_scause() == 13 || r_scause() == 15 ){
-    if(perform_cow(myproc()->pagetable, PGROUNDDOWN(r_stval())) <= 0){
-      printf("error cow page\n");
-      setkilled(myproc());
-    }
-
-  }
-  else if((which_dev = devintr()) != 0){
+  } else if((which_dev = devintr()) != 0){
     // ok
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
